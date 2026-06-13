@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Epictetus — local dev server + LLM proxy + document upload.
+Phren — local dev server + LLM proxy + document upload + stateful teaching workspace.
 
-Serves the app, proxies LLM calls to any OpenAI-compatible backend, and
-accepts document uploads (PDF, text, markdown, HTML) that become the
-course's source material — the single source of truth for AI authoring.
+Serves the app, proxies LLM calls to any OpenAI-compatible backend, accepts
+document uploads (PDF, text, markdown, HTML), and maintains a persistent
+teaching workspace (mission, learning records, glossary, notes, cheat sheets).
 
 Stdlib only — zero pip installs, zero-build prototype.
 
@@ -12,7 +12,7 @@ Run:
     python3 server.py                       # defaults to local Ollama
     # Point at Lenovo over Tailscale:
     LLM_BASE_URL=http://100.85.15.59:11434/v1 \\
-    LLM_MODEL=qwen3.6:35b-a3b \\
+    LLM_MODEL=qwen3-coder-next:q4_K_M \\
     python3 server.py
 """
 
@@ -55,6 +55,10 @@ LLM_TIMEOUT_S = int(os.environ.get("LLM_TIMEOUT_S", "600"))
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", ".uploads"))
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "50"))
 MAX_FILENAME_LEN = 128
+# Stateful teaching workspace — per-student directory on the file system.
+# This is the teacher's memory. Survives server restarts. Based on Matt
+# Pocock's Teach skill methodology (https://youtu.be/s5T5oQJcJ6U).
+WORKSPACE_DIR = Path(os.environ.get("WORKSPACE_DIR", ".phren-workspace"))
 
 
 def sanitize_filename(name: str) -> str:
@@ -134,6 +138,140 @@ def extract_text(path: str, data: bytes) -> str:
         return data.decode("utf-8", errors="replace")
 
 
+# --- Stateful Teaching Workspace ---
+# Matt Pocock's Teach methodology: the teacher remembers where you've been,
+# what you've learned, and what comes next. The file system IS the memory.
+
+class Workspace:
+    """Persistent per-student teaching workspace on the file system.
+
+    Structure:
+      .phren-workspace/
+        mission.md          — why the student is learning
+        learning-records/   — JSON records after each lesson
+        glossary.md         — accumulated terminology
+        notes.md            — agent's internal notes (preferences, watch-outs)
+        cheat-sheets/       — generated reference cards
+    """
+
+    def __init__(self, root: Path):
+        self.root = Path(root)
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "learning-records").mkdir(exist_ok=True)
+        (self.root / "cheat-sheets").mkdir(exist_ok=True)
+
+    # -- mission --
+
+    @property
+    def mission_path(self): return self.root / "mission.md"
+
+    def get_mission(self) -> str | None:
+        if self.mission_path.exists():
+            return self.mission_path.read_text()
+        return None
+
+    def set_mission(self, text: str) -> None:
+        self.mission_path.write_text(text)
+
+    # -- learning records --
+
+    def record_lesson(self, lesson_id: str, data: dict) -> None:
+        """Save a learning record after completing a lesson."""
+        record = {
+            "lesson_id": lesson_id,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            **data,
+        }
+        record_path = self.root / "learning-records" / f"{lesson_id}.json"
+        record_path.write_text(json.dumps(record, indent=2))
+
+    def get_records(self) -> list[dict]:
+        """Return all learning records, most recent first."""
+        records_dir = self.root / "learning-records"
+        records = []
+        for f in sorted(records_dir.glob("*.json"), reverse=True):
+            try:
+                records.append(json.loads(f.read_text()))
+            except json.JSONDecodeError:
+                pass
+        return records
+
+    def last_record(self) -> dict | None:
+        records = self.get_records()
+        return records[0] if records else None
+
+    # -- glossary --
+
+    @property
+    def glossary_path(self): return self.root / "glossary.md"
+
+    def get_glossary(self) -> str:
+        if self.glossary_path.exists():
+            return self.glossary_path.read_text()
+        return ""
+
+    def add_term(self, term: str, definition: str) -> None:
+        """Add or update a glossary entry."""
+        current = self.get_glossary()
+        entry = f"- **{term}**: {definition}\n"
+        if term in current:
+            # Replace existing entry
+            lines = current.split("\n")
+            new_lines = []
+            for line in lines:
+                if line.startswith(f"- **{term}**:"):
+                    new_lines.append(entry.rstrip())
+                else:
+                    new_lines.append(line)
+            current = "\n".join(new_lines) + "\n"
+        else:
+            current += entry
+        self.glossary_path.write_text(current)
+
+    # -- notes --
+
+    @property
+    def notes_path(self): return self.root / "notes.md"
+
+    def get_notes(self) -> str:
+        if self.notes_path.exists():
+            return self.notes_path.read_text()
+        return ""
+
+    def append_note(self, text: str) -> None:
+        stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime())
+        with open(self.notes_path, "a") as f:
+            f.write(f"\n[{stamp}] {text}\n")
+
+    # -- cheat sheets --
+
+    def save_cheat_sheet(self, name: str, content: str) -> None:
+        safe = re.sub(r"[^\w\-]", "_", name)
+        path = self.root / "cheat-sheets" / f"{safe}.md"
+        path.write_text(content)
+
+    def list_cheat_sheets(self) -> list[str]:
+        return [f.stem for f in (self.root / "cheat-sheets").glob("*.md")]
+
+    # -- summary --
+
+    def summary(self) -> dict:
+        """Full workspace state for the health endpoint."""
+        records = self.get_records()
+        return {
+            "has_mission": self.mission_path.exists(),
+            "lesson_count": len(records),
+            "last_lesson": records[0]["lesson_id"] if records else None,
+            "glossary_terms": self.get_glossary().count("- **"),
+            "cheat_sheets": self.list_cheat_sheets(),
+            "notes_size": self.notes_path.stat().st_size if self.notes_path.exists() else 0,
+        }
+
+
+# Global workspace instance — the teacher's memory
+_workspace = Workspace(WORKSPACE_DIR)
+
+
 # --- In-memory store for uploaded documents (reset on server restart) ---
 _uploaded_docs = []
 
@@ -158,13 +296,12 @@ class Handler(SimpleHTTPRequestHandler):
                 "api_key_set": bool(BACKEND["api_key"]),
                 "docs_loaded": len(_uploaded_docs),
                 "doc_names": [d["name"] for d in _uploaded_docs],
+                "workspace": _workspace.summary(),
             })
             return
         if self.path == "/api/source-material":
-            # Return the current source material built from uploaded docs
             sections = []
             for doc in _uploaded_docs:
-                # Truncate each doc to ~8000 chars for the source material
                 text = doc["text"]
                 if len(text) > 4000:
                     text = text[:4000] + "\n\n[... truncated for length ...]"
@@ -178,6 +315,22 @@ class Handler(SimpleHTTPRequestHandler):
                 "sections": sections,
             })
             return
+        if self.path == "/api/workspace":
+            self._send_json(200, {"ok": True, **_workspace.summary()})
+            return
+        if self.path == "/api/workspace/mission":
+            mission = _workspace.get_mission()
+            self._send_json(200, {"ok": True, "mission": mission})
+            return
+        if self.path == "/api/workspace/records":
+            self._send_json(200, {"ok": True, "records": _workspace.get_records()})
+            return
+        if self.path == "/api/workspace/glossary":
+            self._send_json(200, {"ok": True, "glossary": _workspace.get_glossary()})
+            return
+        if self.path == "/api/workspace/notes":
+            self._send_json(200, {"ok": True, "notes": _workspace.get_notes()})
+            return
         return super().do_GET()
 
     def do_POST(self):
@@ -186,6 +339,21 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if self.path == "/api/upload":
             self._handle_upload()
+            return
+        if self.path == "/api/workspace/mission":
+            self._handle_set_mission()
+            return
+        if self.path == "/api/workspace/record":
+            self._handle_record_lesson()
+            return
+        if self.path == "/api/workspace/glossary":
+            self._handle_add_term()
+            return
+        if self.path == "/api/workspace/notes":
+            self._handle_append_note()
+            return
+        if self.path == "/api/workspace/cheat-sheet":
+            self._handle_save_cheat_sheet()
             return
         self._send_json(404, {"ok": False, "error": "Unknown endpoint"})
 
@@ -309,6 +477,75 @@ class Handler(SimpleHTTPRequestHandler):
             "total_chars": sum(len(f["text"]) for f in files),
         })
 
+    # -- workspace mutation handlers --
+
+    def _read_json_body(self) -> dict | None:
+        """Read and parse JSON request body. Returns None on failure."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            return json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, TypeError, json.JSONDecodeError):
+            self._send_json(400, {"ok": False, "error": "Invalid JSON body"})
+            return None
+
+    def _handle_set_mission(self):
+        body = self._read_json_body()
+        if body is None:
+            return
+        mission = body.get("mission", "")
+        if not mission.strip():
+            self._send_json(400, {"ok": False, "error": "mission field required"})
+            return
+        _workspace.set_mission(mission.strip())
+        self._send_json(200, {"ok": True, "mission": mission.strip()})
+
+    def _handle_record_lesson(self):
+        body = self._read_json_body()
+        if body is None:
+            return
+        lesson_id = body.get("lesson_id", "")
+        if not lesson_id:
+            self._send_json(400, {"ok": False, "error": "lesson_id required"})
+            return
+        data = {k: v for k, v in body.items() if k != "lesson_id"}
+        _workspace.record_lesson(lesson_id, data)
+        self._send_json(200, {"ok": True, "recorded": lesson_id})
+
+    def _handle_add_term(self):
+        body = self._read_json_body()
+        if body is None:
+            return
+        term = body.get("term", "").strip()
+        definition = body.get("definition", "").strip()
+        if not term or not definition:
+            self._send_json(400, {"ok": False, "error": "term and definition required"})
+            return
+        _workspace.add_term(term, definition)
+        self._send_json(200, {"ok": True, "term": term})
+
+    def _handle_append_note(self):
+        body = self._read_json_body()
+        if body is None:
+            return
+        note = body.get("note", "").strip()
+        if not note:
+            self._send_json(400, {"ok": False, "error": "note field required"})
+            return
+        _workspace.append_note(note)
+        self._send_json(200, {"ok": True, "appended": True})
+
+    def _handle_save_cheat_sheet(self):
+        body = self._read_json_body()
+        if body is None:
+            return
+        name = body.get("name", "").strip()
+        content = body.get("content", "").strip()
+        if not name or not content:
+            self._send_json(400, {"ok": False, "error": "name and content required"})
+            return
+        _workspace.save_cheat_sheet(name, content)
+        self._send_json(200, {"ok": True, "name": name})
+
     def log_message(self, fmt, *args):
         if "/api/" in (self.path or "") or (args and str(args[1]).startswith(("4", "5"))):
             super().log_message(fmt, *args)
@@ -317,7 +554,7 @@ class Handler(SimpleHTTPRequestHandler):
 def main():
     UPLOAD_DIR.mkdir(exist_ok=True)
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"Epictetus on http://localhost:{PORT}")
+    print(f"Phren on http://localhost:{PORT}")
     print(f"  model backend : {BACKEND['model']}  @ {BACKEND['base_url']}")
     print(f"  api key set   : {bool(BACKEND['api_key'])}")
     print(f"  upload dir    : {UPLOAD_DIR}")
