@@ -1,4 +1,4 @@
-# Socrates
+# Epictetus
 
 Upload any document — PDF, markdown, text, HTML — and get an AI-generated interactive course. Built from the London Tutor architecture but generalized for any content.
 
