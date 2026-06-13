@@ -22,6 +22,7 @@ import re
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -53,6 +54,32 @@ PORT = int(os.environ.get("PORT", "8753"))
 LLM_TIMEOUT_S = int(os.environ.get("LLM_TIMEOUT_S", "600"))
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", ".uploads"))
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "50"))
+MAX_FILENAME_LEN = 128
+
+
+def sanitize_filename(name: str) -> str:
+    """Strip path components, replace unsafe chars, limit length.
+
+    Prevents XSS via crafted filenames and stops path-traversal attacks.
+    """
+    # Strip directory components — keep only the basename
+    name = Path(name).name
+    # Decode any percent-encoded sequences
+    name = urllib.parse.unquote(name)
+    # Replace anything not alnum / dot / dash / underscore with underscore
+    safe = re.sub(r"[^\w.\-]", "_", name, flags=re.UNICODE)
+    # Collapse repeated dots (stops .pdf.html tricks)
+    safe = re.sub(r"\.{2,}", ".", safe)
+    # Strip leading dots (hidden files) and leading dashes
+    safe = safe.lstrip(".-")
+    # If we stripped everything, use a stable fallback
+    if not safe:
+        safe = "uploaded_document"
+    # Truncate to max length, preserving extension
+    if len(safe) > MAX_FILENAME_LEN:
+        stem, _, ext = safe.rpartition(".")
+        safe = stem[: MAX_FILENAME_LEN - len(ext) - 1] + "." + ext
+    return safe
 
 
 def extract_text_from_pdf(data: bytes) -> str:
@@ -259,7 +286,7 @@ class Handler(SimpleHTTPRequestHandler):
             match = re.search(r'filename="([^"]*)"', headers_raw)
             if not match:
                 continue
-            filename = match.group(1)
+            filename = sanitize_filename(match.group(1))
             if not filename:
                 continue
 

@@ -97,9 +97,11 @@
     }
 
     setAuthorBusy(true);
-    setAuthorStatus("loading", `Your AI teacher is writing a lesson on \u201c${escapeHtml(subject)}\u201d\u2026 this can take a moment.`);
+    const stopProgress = startProgress(els.authorStatus,
+      `Your AI teacher is writing a lesson on \u201c${escapeHtml(subject)}\u201d\u2026`);
 
     const res = await LLM.generateJSON(buildAuthorPrompt(subject, level), { maxTokens: 1800, temperature: 0.6 });
+    stopProgress();
     setAuthorBusy(false);
 
     if (!res.ok) {
@@ -167,9 +169,6 @@
       if (s.type === "teach") {
         if (isStr(s.title) && isStr(s.body)) {
           const step = { type: "teach", title: s.title.trim(), body: s.body.trim() };
-          // A teach step may carry an interactive board walkthrough. We validate
-          // it defensively so a malformed board is dropped (text still shows)
-          // rather than crashing the replay widget.
           const board = validateBoard(s.board);
           if (board) step.board = board;
           steps.push(step);
@@ -185,10 +184,9 @@
             insight: isStr(o.insight) ? o.insight.trim() : "",
           }));
         if (opts.length < 2) continue;
-        // Enforce exactly one correct answer.
         const correctCount = opts.filter((o) => o.correct).length;
-        if (correctCount === 0) continue;              // unusable — drop this check
-        if (correctCount > 1) {                         // keep first true, demote rest
+        if (correctCount === 0) continue;
+        if (correctCount > 1) {
           let seen = false;
           opts = opts.map((o) => (o.correct && !seen ? ((seen = true), o) : { ...o, correct: false }));
         }
@@ -215,10 +213,6 @@
     };
   }
 
-  // Validate/repair a teach step's `board` directive (a ChessReplay walkthrough).
-  // Returns a clean board, or null if it isn't a usable walkthrough. The replay
-  // widget applies from->to blindly, so we at least guarantee real board squares
-  // and a sane length; we can't fully verify legality client-side.
   function validateBoard(b) {
     if (!b || typeof b !== "object") return null;
     if (!Array.isArray(b.line)) return null;
@@ -230,15 +224,14 @@
       if (!m || typeof m !== "object") continue;
       const from = isStr(m.from) ? m.from.trim().toLowerCase() : "";
       const to = isStr(m.to) ? m.to.trim().toLowerCase() : "";
-      if (!sq.test(from) || !sq.test(to)) continue; // drop bad coordinates
+      if (!sq.test(from) || !sq.test(to)) continue;
       line.push({
-        from,
-        to,
+        from, to,
         san: isStr(m.san) ? m.san.trim() : "",
         note: isStr(m.note) ? m.note.trim() : "",
       });
     }
-    if (line.length < 2) return null; // too short to "work through"
+    if (line.length < 2) return null;
     return { startFen, line: line.slice(0, 24) };
   }
 
@@ -248,7 +241,7 @@
     els.authorBtn.classList.toggle("opacity-50", busy);
     els.authorBtn.classList.toggle("cursor-not-allowed", busy);
     els.authorBtn.innerHTML = busy
-      ? '<svg class="spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.25"/><path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg> Writing…'
+      ? '<svg class="spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.25"/><path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg> Writing\u2026'
       : "Generate lesson";
   }
 
@@ -259,27 +252,42 @@
     els.authorStatus.innerHTML = html;
   }
 
-  // ---- Author the NEXT lesson in a sequence (model-generated progression) ----
-  // `seed` lets the home "Continue" button drive this AFTER a page reload, when
-  // the just-finished run is no longer in memory: we reconstruct the context
-  // (previous title + weak spots) from the saved progress log instead.
+  // ---- Progress timer — gives the user a sense of what's happening ----
+  // during multi-minute LLM calls. Call startProgress(containerEl, baseLabel)
+  // to begin ticking elapsed seconds; returns a stop function.
+  function startProgress(el, baseLabel) {
+    const t0 = Date.now();
+    const stages = [
+      { at: 5, label: "Reading your documents\u2026" },
+      { at: 15, label: "The model is thinking \u2014 local models need a moment\u2026" },
+      { at: 45, label: "Still working \u2014 larger lessons take longer to write\u2026" },
+      { at: 90, label: "Almost there \u2014 validating the response\u2026" },
+    ];
+    const timer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - t0) / 1000);
+      let stage = baseLabel;
+      for (let i = stages.length - 1; i >= 0; i--) {
+        if (elapsed >= stages[i].at) { stage = stages[i].label; break; }
+      }
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      el.innerHTML = `<span class="text-slate-300">${stage}</span> <span class="text-slate-500 font-mono text-xs ml-1">(${timeStr})</span>`;
+    }, 1000);
+    return () => { clearInterval(timer); };
+  }
+
+  // ---- Author the NEXT lesson in a sequence ----
   async function generateNextLesson(seed) {
     S.nextSeed = seed || null;
     LT.show("review");
-    els.reviewBody.innerHTML = `
-      <div class="rounded-2xl bg-slate-900 border border-white/5 p-8 text-center">
-        <svg class="spin w-8 h-8 mx-auto text-brand-400 mb-4" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.25"/>
-          <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-        </svg>
-        <p class="text-white font-semibold">Building your next lesson…</p>
-        <p class="text-slate-400 text-sm mt-1">Written from your source material, advancing from what you just learned with extra focus on your weak spots.</p>
-      </div>`;
+    const stopProgress = startProgress(els.reviewBody, "Building your next lesson\u2026");
 
     const backToReview = () => LT.Review.renderReview(S.lastResult, S.lastSummary);
 
     const h = await LLM.health();
     if (!h.ok) {
+      stopProgress();
       els.reviewBody.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-white/5 p-6 text-center">
         <p class="text-red-400 font-semibold">The AI model is offline, so the next lesson can't be generated.</p>
         <button id="back-btn" class="mt-4 bg-transparent border border-white/10 text-slate-300 hover:bg-white/5 font-semibold px-5 py-2.5 rounded-xl transition">Back to review</button></div>`;
@@ -288,6 +296,7 @@
     }
 
     const res = await LLM.generateJSON(buildNextLessonPrompt(), { maxTokens: 2800, temperature: 0.5 });
+    stopProgress();
     if (!res.ok) {
       els.reviewBody.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-white/5 p-6 text-center">
         <p class="text-red-400 font-semibold">Couldn't generate the next lesson: ${escapeHtml(res.error || "unknown error")}.</p>
@@ -295,7 +304,7 @@
       document.getElementById("back-btn").addEventListener("click", backToReview);
       return;
     }
-    const v = validateLesson(res.data, ((S.activeLesson && S.activeLesson.title) || "Next") + " — next lesson");
+    const v = validateLesson(res.data, ((S.activeLesson && S.activeLesson.title) || "Next") + " \u2014 next lesson");
     if (!v.ok) {
       els.reviewBody.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-white/5 p-6 text-center">
         <p class="text-red-400 font-semibold">The next lesson came back malformed (${escapeHtml(v.error)}).</p>
@@ -311,24 +320,18 @@
   // ---- Author the FIRST lesson from uploaded source material ----
   async function generateFirstLesson() {
     LT.show("review");
-    els.reviewBody.innerHTML = `
-      <div class="rounded-2xl bg-slate-900 border border-white/5 p-8 text-center">
-        <svg class="spin w-8 h-8 mx-auto text-brand-400 mb-4" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.25"/>
-          <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-        </svg>
-        <p class="text-white font-semibold">Building your first lesson\u2026</p>
-        <p class="text-slate-400 text-sm mt-1">Reading your documents and writing a lesson grounded entirely in your source material. This may take a moment on the local model.</p>
-      </div>`;
+    const stopProgress = startProgress(els.reviewBody, "Building your first lesson\u2026");
 
     const h = await LLM.health();
     if (!h.ok) {
+      stopProgress();
       els.reviewBody.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-white/5 p-6 text-center">
         <p class="text-red-400 font-semibold">The AI model is offline. Please check that the server is running and the Lenovo is reachable.</p></div>`;
       return;
     }
 
     const res = await LLM.generateJSON(await buildFirstLessonPrompt(), { maxTokens: 2800, temperature: 0.6 });
+    stopProgress();
     if (!res.ok) {
       els.reviewBody.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-white/5 p-6 text-center">
         <p class="text-red-400 font-semibold">Couldn't generate the lesson: ${escapeHtml(res.error || "unknown error")}.</p></div>`;
