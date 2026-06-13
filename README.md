@@ -1,8 +1,12 @@
-# Epictetus
+# Phren
 
 Upload any document — PDF, markdown, text, HTML — and get an AI-generated interactive course. Built from the London Tutor architecture but generalized for any content.
 
-**Powered by the Lenovo ThinkStation** — all AI runs on a local model (qwen3.6:35b-a3b) over Tailscale. No API keys, no cloud, no data leaving your network.
+**Powered by the Lenovo ThinkStation** — all AI runs on a local model (qwen3-coder-next:q4_K_M) over Tailscale. No API keys, no cloud, no data leaving your network.
+
+## The Name
+
+φρήν (*phrēn*) — Ancient Greek for the seat of thoughtful reflection. Not intellect alone (*nous*), but the process of careful, embodied reasoning. Hippocrates and Aristotle used it to describe the mind at work — the midriff, where Greeks believed deep thought lived. The tool doesn't tell you what to think. It helps you think through.
 
 ## What it does
 
