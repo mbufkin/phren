@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="An AI tutor that teaches the London System chess opening, then reviews how you actually played to tell you what to practice next." />
+  <title>London Tutor — learn, play, get coached</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // One primary brand color (indigo). Semantic colors come from Tailwind's
+    // built-in green/red/amber — used ONLY for meaning, never decoration.
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          fontFamily: { sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"] },
+          colors: { brand: { 400: "#818cf8", 500: "#6366f1", 600: "#4f46e5", 700: "#4338ca" } },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="board.css" />
+  <style>
+    /* Tighten large headings (the "instant pro" tweak from the checklist). */
+    .display { letter-spacing: -0.02em; line-height: 1.05; }
+    /* Smooth, GPU-friendly screen transitions (micro-interaction). */
+    .screen { animation: fade-in 0.4s ease both; }
+    @keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    /* Progress fill animates as the learner advances. */
+    #progress-fill { transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+    .spin { animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+
+<body class="min-h-screen bg-slate-950 text-slate-200 font-sans antialiased">
+  <!-- Ambient glow for depth (subtle, not decoration-for-decoration's-sake). -->
+  <div class="pointer-events-none fixed inset-0 -z-10 opacity-60"
+       style="background: radial-gradient(60% 50% at 20% 0%, rgba(99,102,241,0.15), transparent 60%), radial-gradient(50% 40% at 90% 5%, rgba(168,85,247,0.10), transparent 55%);"></div>
+
+  <!-- ===== Header ===== -->
+  <header class="border-b border-white/5 bg-slate-950/70 backdrop-blur sticky top-0 z-20">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 h-14 flex items-center justify-between">
+      <!-- Logo doubles as the "home" affordance from any screen. -->
+      <button id="home-link" class="flex items-center gap-2.5 hover:opacity-80 transition" aria-label="Back to home">
+        <span class="grid place-items-center w-7 h-7 rounded-lg bg-brand-500 text-white">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4" aria-hidden="true">
+            <path d="M12 5 2 9.5 12 14l10-4.5L12 5Z" /><path d="M5 11v4.2c0 .9 3.1 2.3 7 2.3s7-1.4 7-2.3V11" />
+          </svg>
+        </span>
+        <span class="font-extrabold tracking-tight">London Tutor</span>
+      </button>
+      <div class="flex items-center gap-4 sm:gap-5">
+        <!-- Data tab: jumps to the learner's profile + AI analysis. -->
+        <button id="profile-btn" class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-300 hover:text-white transition">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4" aria-hidden="true">
+            <path d="M4 20V10M10 20V4M16 20v-7M20 20H3" />
+          </svg>
+          Profile
+        </button>
+        <div id="model-badge" class="text-xs text-slate-400 flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span>
+          <span id="model-name">connecting…</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-6xl px-4 sm:px-6 py-8">
+
+    <!-- ===== Welcome screen ===== -->
+    <section id="screen-welcome" class="screen">
+      <div class="max-w-2xl mx-auto text-center pt-6 pb-4">
+        <p id="hero-eyebrow" class="text-brand-400 font-semibold text-sm uppercase tracking-widest mb-3">Your course</p>
+        <h1 class="display text-4xl sm:text-5xl font-extrabold text-white mb-4">Learn the London System</h1>
+        <p class="text-slate-400 text-lg leading-relaxed mb-8">
+          Start with the London System, then keep going &mdash; each lesson you finish unlocks the next,
+          generated for you <em>in order</em>. Play on a real board and get a coaching review every time.
+        </p>
+        <div class="flex items-center justify-center gap-3 flex-wrap">
+          <button id="start-btn"
+            class="inline-flex items-center gap-2 bg-brand-500 hover:bg-brand-600 active:translate-y-px text-white font-semibold px-6 py-3 rounded-xl transition shadow-lg shadow-brand-500/20">
+            Start lesson 1
+            <span aria-hidden="true">&rarr;</span>
+          </button>
+          <!-- Jump back into any lesson that's already been made. Hidden until
+               there's a generated course to revisit (engine.js toggles it). -->
+          <button id="library-btn" hidden
+            class="inline-flex items-center gap-2 bg-transparent border border-white/10 text-slate-300 hover:bg-white/5 active:translate-y-px font-semibold px-6 py-3 rounded-xl transition">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4" aria-hidden="true">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+            </svg>
+            Previous lessons
+          </button>
+        </div>
+      </div>
+
+      <!-- Persistent learner progress (filled by engine.js from LearnerStore).
+           Hidden until there's at least one completed lesson to show. -->
+      <div id="progress-panel" class="max-w-3xl mx-auto mt-2 mb-2" hidden></div>
+
+      <!-- How it works: 3 steps (visual hierarchy: icon + title + sub). -->
+      <div class="grid sm:grid-cols-3 gap-4 mt-10 max-w-3xl mx-auto">
+        <div class="rounded-2xl bg-slate-900 border border-white/5 p-5">
+          <div class="w-10 h-10 rounded-lg bg-brand-500/10 grid place-items-center mb-3 text-brand-400">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5" aria-hidden="true">
+              <path d="M12 7c-1.5-1-3.5-1.5-5.5-1.5S3 6 2.5 6.3v12C3 18 4.5 17.5 6.5 17.5s4 .5 5.5 1.5m0-12c1.5-1 3.5-1.5 5.5-1.5S21 6 21.5 6.3v12c-.5-.3-2-.8-4-.8s-4 .5-5.5 1.5m0-12v12" />
+            </svg>
+          </div>
+          <h3 class="font-semibold text-white">1. Learn</h3>
+          <p class="text-sm text-slate-400 mt-1">Short teaching cards explain each move and the idea behind it.</p>
+        </div>
+        <div class="rounded-2xl bg-slate-900 border border-white/5 p-5">
+          <div class="w-10 h-10 rounded-lg bg-brand-500/10 grid place-items-center mb-3 text-brand-400">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="w-5 h-5" aria-hidden="true">
+              <rect x="3.5" y="3.5" width="7" height="7" rx="1.2" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.2" />
+              <rect x="3.5" y="13.5" width="7" height="7" rx="1.2" /><rect x="13.5" y="13.5" width="7" height="7" rx="1.2" />
+            </svg>
+          </div>
+          <h3 class="font-semibold text-white">2. Play</h3>
+          <p class="text-sm text-slate-400 mt-1">Find each move on a live board. Wrong tries get gentle, specific coaching.</p>
+        </div>
+        <div class="rounded-2xl bg-slate-900 border border-white/5 p-5">
+          <div class="w-10 h-10 rounded-lg bg-brand-500/10 grid place-items-center mb-3 text-brand-400">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5" aria-hidden="true">
+              <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" /><path d="m9 11 2 2 4-4" />
+            </svg>
+          </div>
+          <h3 class="font-semibold text-white">3. Get reviewed</h3>
+          <p class="text-sm text-slate-400 mt-1">An AI coach reads how you played and tells you what to practice next.</p>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ===== Lesson screen ===== -->
+    <section id="screen-lesson" class="screen" hidden>
+      <!-- Progress -->
+      <div class="mb-6">
+        <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+          <span id="step-counter">Step 1</span>
+          <span id="lesson-title-mini" class="font-medium text-slate-300">The London System</span>
+        </div>
+        <div class="h-1.5 rounded-full bg-white/5 overflow-hidden">
+          <div id="progress-fill" class="h-full bg-brand-500 rounded-full" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <div id="lesson-grid" class="grid lg:grid-cols-[1fr_minmax(300px,420px)] gap-6 items-start">
+        <!-- Left: teaching / move prompt / checks -->
+        <div class="order-2 lg:order-1">
+          <div id="step-card" class="rounded-2xl bg-slate-900 border border-white/5 p-6 min-h-[180px]"></div>
+          <div id="feedback" class="mt-4"></div>
+          <div id="controls" class="mt-5 flex flex-wrap gap-3"></div>
+        </div>
+
+        <!-- Right: the board + move log (hidden for board-free lessons) -->
+        <div id="board-col" class="order-1 lg:order-2">
+          <div id="board"></div>
+          <div class="mt-3 rounded-xl bg-slate-900 border border-white/5 px-4 py-3">
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Moves</p>
+            <p id="move-log" class="text-sm text-slate-300 font-medium leading-relaxed min-h-[1.25rem]">&mdash;</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Review screen ===== -->
+    <section id="screen-review" class="screen" hidden>
+      <div class="max-w-3xl mx-auto">
+        <div id="review-body"></div>
+      </div>
+    </section>
+
+    <!-- ===== Profile / data screen ===== -->
+    <section id="screen-profile" class="screen" hidden>
+      <div class="max-w-3xl mx-auto">
+        <div id="profile-body"></div>
+      </div>
+    </section>
+
+    <!-- ===== Lesson library screen (revisit any made lesson) ===== -->
+    <section id="screen-library" class="screen" hidden>
+      <div class="max-w-3xl mx-auto">
+        <div id="library-body"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="source-material.js"></script>
+  <script src="lesson-data.js"></script>
+  <script src="london-source-lesson.js"></script>
+  <!-- Pre-generated course (built by gen-course.js). Optional: the app falls
+       back to live generation if this file isn't present yet. -->
+  <script src="course-lessons.js"></script>
+  <script src="board.js"></script>
+  <script src="board-replay.js"></script>
+  <script src="telemetry.js"></script>
+  <script src="llm.js"></script>
+  <script src="store.js"></script>
+  <!-- Engine, split by concern. Load order matters for the boot code in
+       engine.js (it runs last); cross-module calls resolve at runtime via LT. -->
+  <script src="state.js"></script>
+  <script src="authoring.js"></script>
+  <script src="review.js"></script>
+  <script src="profile.js"></script>
+  <script src="engine.js"></script>
+</body>
+</html>

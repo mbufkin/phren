@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# OS / misc
+Thumbs.db
+
+# Local server artifacts (if ever used)
+__pycache__/
+
+# Secrets / local config — NEVER commit API keys.
+# server.py reads this at startup; keep it on your machine only.
+.env
+.env.local

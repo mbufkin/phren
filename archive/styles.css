@@ -1,0 +1,23 @@
+/*
+  Bloom Assessment Engine — custom styles
+  ---------------------------------------
+  Tailwind (loaded via the Play CDN) handles the utility classes; this file
+  holds the handful of things utilities can't express cleanly: scrollbar
+  theming, the max-height accordion transition, and the ambient hero glow.
+*/
+
+/* Subtle custom scrollbar for the premium dark look. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #475569; background-clip: content-box; }
+
+/* Smooth accordion expand/collapse driven by max-height (height:auto can't animate). */
+.collapse-body { max-height: 0; overflow: hidden; transition: max-height 0.35s ease, opacity 0.35s ease, margin 0.35s ease; opacity: 0; }
+.collapse-body.open { max-height: 360px; opacity: 1; margin-top: 0.75rem; }
+
+/* Ambient gradient glow behind the hero. */
+.glow {
+  background: radial-gradient(60% 60% at 20% 0%, rgba(99,102,241,0.18) 0%, transparent 60%),
+              radial-gradient(50% 50% at 90% 10%, rgba(168,85,247,0.14) 0%, transparent 55%);
+}

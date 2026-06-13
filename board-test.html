@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>Board widget — visual check</title>
+  <link rel="stylesheet" href="board.css" />
+  <style>
+    /* Page styling demonstrates the dark-mode depth rule:
+       bg (slate-950) -> card (lighter) -> board sits on the card. */
+    :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; background: #020617; color: #e2e8f0;
+      display: grid; place-items: center; padding: 32px;
+    }
+    .card {
+      width: min(560px, 100%);
+      background: #0f172a;                 /* lighter than page = elevation */
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 20px; padding: 24px;
+      box-shadow: 0 30px 60px -30px rgba(0,0,0,0.8);
+    }
+    /* Heading: tight tracking + tight leading on large text. */
+    h1 { margin: 0 0 4px; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+    p.sub { margin: 0 0 20px; color: #94a3b8; font-size: 14px; }
+    .row { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+    /* Buttons with real states: hover, active, disabled (signifiers). */
+    button {
+      font: inherit; font-weight: 600; font-size: 14px; color: #e2e8f0;
+      padding: 10px 18px; border-radius: 10px; cursor: pointer;
+      background: #6366f1; border: 1px solid transparent; transition: all 0.15s ease;
+    }
+    button:hover { background: #4f46e5; }
+    button:active { transform: translateY(1px); }
+    button.ghost { background: transparent; border-color: rgba(255,255,255,0.14); }
+    button.ghost:hover { background: rgba(255,255,255,0.06); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .log {
+      margin-top: 16px; font-size: 12px; color: #cbd5e1; min-height: 18px;
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>London System &mdash; board widget</h1>
+    <p class="sub">Click a white piece, then a destination. "Play next" steps through the London line.</p>
+    <div id="board"></div>
+    <div class="row">
+      <button id="next">Play next London move</button>
+      <button id="reset" class="ghost">Reset</button>
+    </div>
+    <div class="log" id="log">Ready.</div>
+  </div>
+
+  <script src="board.js"></script>
+  <script>
+    const START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+    // A scripted London teaching line (SAN-ish, expressed as from/to pairs).
+    const LINE = [
+      { from: "d2", to: "d4", san: "1. d4" },
+      { from: "d7", to: "d5", san: "1... d5" },
+      { from: "c1", to: "f4", san: "2. Bf4" },
+      { from: "g8", to: "f6", san: "2... Nf6" },
+      { from: "e2", to: "e3", san: "3. e3" },
+      { from: "e7", to: "e6", san: "3... e6" },
+      { from: "g1", to: "f3", san: "4. Nf3" },
+      { from: "f8", to: "d6", san: "4... Bd6" },
+      { from: "f1", to: "d3", san: "5. Bd3" },
+      { from: "e8", to: "g8", san: "5... O-O (black)" },
+    ];
+    let ply = 0;
+    const log = document.getElementById("log");
+
+    const board = new ChessBoard(document.getElementById("board"), {
+      onMove: ({ from, to, piece }) => {
+        // Free-play: accept any user move so we can verify animation/capture.
+        log.textContent = `You moved ${piece} ${from} \u2192 ${to}`;
+        board.applyMove(from, to);
+      },
+    });
+    board.setPosition(START);
+
+    document.getElementById("next").addEventListener("click", () => {
+      if (ply >= LINE.length) { log.textContent = "End of line."; return; }
+      const m = LINE[ply++];
+      board.applyMove(m.from, m.to);
+      board.flash(m.to, "correct");
+      log.textContent = `Played ${m.san}`;
+    });
+    document.getElementById("reset").addEventListener("click", () => {
+      ply = 0; board.setPosition(START); log.textContent = "Reset.";
+    });
+  </script>
+</body>
+</html>

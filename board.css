@@ -1,0 +1,126 @@
+/*
+  Chessboard widget styles (portable, dark-mode-first).
+  Design notes (per the UI/UX checklist):
+   - Depth from elevation + subtle ring, not heavy shadows.
+   - Every state is a *signifier*: selectable, selected, target, last-move,
+     correct (green), incorrect (red) — the board teaches how it works.
+   - Piece movement is a micro-interaction (smooth slide), not a teleport.
+*/
+
+.cb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+  overflow: hidden;
+  /* Subtle elevation ring instead of a hard border (dark-mode depth). */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 18px 40px -18px rgba(0, 0, 0, 0.7);
+  user-select: none;
+  touch-action: manipulation;
+  /* Establish a size container so children can scale to the BOARD's rendered
+     width (via cqw units), not the viewport. This is the key to pieces and
+     labels always fitting their square regardless of how wide the board is. */
+  container-type: size;
+}
+
+/* The 8x8 checker pattern. */
+.cb-squares {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+}
+.cb-sq.light { background: #cdd6e3; }
+.cb-sq.dark  { background: #6c7f9c; }
+
+/* Coordinate labels (small signifier, low emphasis). */
+.cb-coord {
+  position: absolute;
+  font-size: clamp(7px, 1.5vw, 11px);
+  font-size: clamp(7px, 2.4cqw, 11px);
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.cb-coord.file { right: 3px; bottom: 2px; }
+.cb-coord.rank { left: 3px;  top: 2px; }
+/* Contrast the label against its square color. */
+.cb-sq.light .cb-coord { color: #56627a; }
+.cb-sq.dark  .cb-coord { color: #e8edf4; }
+
+/* Overlay layers sit above squares, below/at pieces. */
+.cb-layer { position: absolute; inset: 0; pointer-events: none; }
+
+/* State highlights painted on squares. */
+.cb-hl {
+  position: absolute;
+  width: 12.5%;
+  height: 12.5%;
+  transition: opacity 0.18s ease;
+}
+.cb-hl.last     { background: rgba(250, 204, 21, 0.30); }      /* last move (amber) */
+.cb-hl.selected { background: rgba(99, 102, 241, 0.45); box-shadow: inset 0 0 0 3px rgba(129,140,248,0.9); }
+.cb-hl.correct  { background: rgba(34, 197, 94, 0.45); }       /* green = success */
+.cb-hl.incorrect{ background: rgba(239, 68, 68, 0.45); }       /* red = danger */
+
+/* Target dots: a clear "you can move here" affordance. */
+.cb-target {
+  position: absolute;
+  width: 12.5%;
+  height: 12.5%;
+  display: grid;
+  place-items: center;
+}
+.cb-target::after {
+  content: "";
+  width: 28%;
+  height: 28%;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+/* Pieces: absolutely positioned, slide between squares (micro-interaction). */
+.cb-piece {
+  position: absolute;
+  width: 12.5%;
+  height: 12.5%;
+  display: grid;
+  place-items: center;
+  /* Each square is 12.5cqw wide; ~10cqw keeps the glyph comfortably inside the
+     square and centered. The vw line is a fallback for engines without
+     container-query units. */
+  font-size: 7vw;
+  font-size: 10cqw;
+  line-height: 1;
+  text-align: center;
+  cursor: pointer;
+  transition: left 0.26s cubic-bezier(0.22, 1, 0.36, 1), top 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: left, top;
+}
+.cb-piece.white { color: #f8fafc; text-shadow: 0 1px 1px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.6); }
+.cb-piece.black { color: #1f2937; text-shadow: 0 1px 0 rgba(255,255,255,0.25); }
+
+/* Captured piece fades out as it's removed. */
+.cb-piece.captured { opacity: 0; transform: scale(0.6); transition: opacity 0.2s ease, transform 0.2s ease; }
+
+/* Incorrect-move shake (feedback micro-interaction). */
+@keyframes cb-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6%); }
+  75% { transform: translateX(6%); }
+}
+.cb-piece.shake { animation: cb-shake 0.3s ease; }
+
+/* When interaction is locked, the board reads as non-interactive. */
+.cb.locked .cb-piece { cursor: default; }
+
+/* Replay/"book diagram" mode: jump between positions with NO slide animation
+   (used when stepping backward or jumping), so only forward Next animates. */
+.cb.no-anim .cb-piece { transition: none !important; }
+
+/* On-board move arrow (the "show me how we got here" aid in replay mode). */
+.cb-arrows { z-index: 6; }
+.cb-arrows line { stroke: rgba(99, 102, 241, 0.85); stroke-width: 0.16; stroke-linecap: round; }
+.cb-arrows path { fill: rgba(99, 102, 241, 0.85); }
