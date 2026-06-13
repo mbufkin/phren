@@ -22,8 +22,6 @@ import re
 import time
 import urllib.request
 import urllib.error
-import cgi
-import io
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -47,7 +45,7 @@ _load_dotenv()
 # --- Backend configuration -------------------------------------------------
 BACKEND = {
     "base_url": os.environ.get("LLM_BASE_URL", "http://127.0.0.1:11434/v1"),
-    "model": os.environ.get("LLM_MODEL", "qwen3.6:35b-a3b"),
+    "model": os.environ.get("LLM_MODEL", "qwen2.5-coder:32b"),
     "api_key": os.environ.get("LLM_API_KEY", ""),
 }
 
