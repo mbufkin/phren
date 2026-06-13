@@ -14,44 +14,70 @@
   const els = LT.els;
   const { escapeHtml, isStr, slug } = LT;
 
-  // ---- Grounding: the source material is the model's SINGLE SOURCE OF TRUTH ----
-  // Every lesson the AI writes is built FROM the supplied corpus (source-material.js),
-  // not from the model's own chess memory. We pass the text in and enforce a strict
-  // contract: teach only what the source supports, never invent theory.
-  function sourceText() {
+  // ---- Grounding: uploaded documents are the model's SINGLE SOURCE OF TRUTH ----
+  // Every lesson the AI writes is built FROM the uploaded corpus, not from the
+  // model's own knowledge. We pass the text in and enforce a strict contract:
+  // teach only what the source supports, never invent theory.
+
+  // Cached source material fetched from /api/source-material
+  let _sourceCache = null;
+
+  async function fetchSourceMaterial() {
+    if (_sourceCache) return _sourceCache;
+    try {
+      const resp = await fetch('/api/source-material');
+      const data = await resp.json();
+      if (data.ok) {
+        _sourceCache = data;
+        return data;
+      }
+    } catch (e) { /* fall through to static fallback */ }
+    // Fallback to static SOURCE_MATERIAL if server not available
     const sm = window.SOURCE_MATERIAL;
-    return sm && isStr(sm.text) ? sm.text.trim() : "";
+    return { title: sm.title, sections: sm.sections || [] };
   }
 
-  // Real, canonical lines the model can reuse to ground board walkthroughs so it
-  // doesn't fabricate illegal/inaccurate moves.
-  function sourceKeyLines() {
+  function sourceText() {
+    // Synchronous fallback for initial render — uses static SOURCE_MATERIAL
     const sm = window.SOURCE_MATERIAL;
-    if (!sm || !Array.isArray(sm.keyLines)) return "";
-    return sm.keyLines.map((l) => `- ${l.name}: ${l.moves}  (${l.idea})`).join("\n");
+    if (!sm || !Array.isArray(sm.sections) || !sm.sections.length) return "";
+    return sm.sections.map(s => `## ${s.heading}\n\n${s.body}`).join("\n\n");
+  }
+
+  async function sourceTextAsync() {
+    const data = await fetchSourceMaterial();
+    if (!data.sections || !data.sections.length) return "";
+    return data.sections.map(s => `## ${s.heading}\n\n${s.body}`).join("\n\n");
   }
 
   // The grounding contract, appended to every authoring system prompt.
   const GROUNDING_RULES =
     "GROUNDING \u2014 THIS IS THE MOST IMPORTANT RULE:\n" +
     "- The SOURCE MATERIAL provided in the user message is your SINGLE SOURCE OF TRUTH.\n" +
-    "- Teach ONLY ideas, moves, plans, evaluations, names and lines that are stated in, " +
-    "or follow directly from, that source. Do NOT add outside theory, invent games/players, " +
-    "or contradict the source.\n" +
+    "- Teach ONLY concepts, facts, and ideas that are stated in, or follow directly from, " +
+    "that source. Do NOT add outside knowledge, invent examples, or contradict the source.\n" +
     "- If the source doesn't cover something, leave it out rather than guessing.\n" +
     "- Ground every knowledge check in a fact from the source, and base each wrong option on a " +
-    "misconception the source actually warns about (see its 'common misconceptions' section).\n" +
-    "- For board walkthroughs, reuse the source's KEY LINES (below) rather than improvising moves.";
+    "plausible but incorrect interpretation a learner might make.\n" +
+    "- Every distractor for a knowledge check should map to a specific section of the source " +
+    "so a wrong answer tells the learner exactly where to restudy.";
 
   // Builds the "SOURCE MATERIAL" block placed at the top of the user message.
   function sourceBlock() {
     const text = sourceText();
     if (!text) return "";
-    const lines = sourceKeyLines();
     return (
       "SOURCE MATERIAL (your single source of truth \u2014 teach only from this):\n" +
-      '"""\n' + text + '\n"""\n\n' +
-      (lines ? "KEY LINES (reuse these for board walkthroughs):\n" + lines + "\n\n" : "")
+      '"""\n' + text + '\n"""\n'
+    );
+  }
+
+  async function sourceBlockAsync() {
+    const text = await sourceTextAsync();
+    if (!text) return "";
+    return (
+      "SOURCE MATERIAL (your single source of truth \u2014 teach only from this):\n" +
+      '"""\n' + text + '\n"""\n'
     );
   }
 
@@ -89,7 +115,7 @@
     LT.startLesson(v.lesson);
   }
 
-  function buildAuthorPrompt(subject, level) {
+  async function buildAuthorPrompt(subject, level) {
     const system =
       "You are a master teacher who designs short, interactive micro-lessons. " +
       "You write for the LEARNER, in plain, encouraging language. Your lessons go beyond recall: " +
@@ -112,16 +138,17 @@
       "RULES:\n" +
       "- 7 to 9 steps total. Start with a 'teach' that motivates the topic.\n" +
       "- Step 2 (or 3) MUST be a 'teach' that walks through ONE concrete, illustrative worked example BEFORE any abstract rules \u2014 " +
-      "like a textbook (or chess book) that opens a chapter with a fully worked example or model scenario, narrating it step by step. " +
+      "like a textbook that opens a chapter with a fully worked example or model scenario, narrating it step by step. " +
       "Only after that example should you generalize into the underlying principles.\n" +
       "- End with a 'teach' that summarizes what the learner now understands.\n" +
       "- Include 3 or 4 'check' steps, spread between teaching cards.\n" +
       "- Each 'check' has 3 or 4 options with EXACTLY ONE correct:true. Every wrong option needs a short 'miss' tag and an 'insight'.\n" +
       "- 'concept' and 'miss' are short kebab-case tags (e.g. 'confuses-cause-effect').\n" +
-      "- No markdown, no code fences, no commentary — JSON only. Do NOT include any 'move' steps.\n\n" +
+      "- No markdown, no code fences, no commentary \u2014 JSON only. Do NOT include any 'move' steps or 'board' fields.\n\n" +
       GROUNDING_RULES;
+    const source = await sourceBlockAsync();
     const user =
-      sourceBlock() +
+      source +
       `Focus the lesson on this aspect of the source material: ${subject}\n` +
       `Learner level: ${level}\n` +
       "Write the lesson now as a single JSON object, grounded entirely in the source material above.";
@@ -281,6 +308,71 @@
     LT.startLesson(v.lesson);
   }
 
+  // ---- Author the FIRST lesson from uploaded source material ----
+  async function generateFirstLesson() {
+    LT.show("review");
+    els.reviewBody.innerHTML = `
+      <div class="rounded-2xl bg-slate-900 border border-white/5 p-8 text-center">
+        <svg class="spin w-8 h-8 mx-auto text-brand-400 mb-4" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.25"/>
+          <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <p class="text-white font-semibold">Building your first lesson\u2026</p>
+        <p class="text-slate-400 text-sm mt-1">Reading your documents and writing a lesson grounded entirely in your source material. This may take a moment on the local model.</p>
+      </div>`;
+
+    const h = await LLM.health();
+    if (!h.ok) {
+      els.reviewBody.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-white/5 p-6 text-center">
+        <p class="text-red-400 font-semibold">The AI model is offline. Please check that the server is running and the Lenovo is reachable.</p></div>`;
+      return;
+    }
+
+    const res = await LLM.generateJSON(await buildFirstLessonPrompt(), { maxTokens: 2800, temperature: 0.6 });
+    if (!res.ok) {
+      els.reviewBody.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-white/5 p-6 text-center">
+        <p class="text-red-400 font-semibold">Couldn't generate the lesson: ${escapeHtml(res.error || "unknown error")}.</p></div>`;
+      return;
+    }
+    const v = validateLesson(res.data, "Introduction");
+    if (!v.ok) {
+      els.reviewBody.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-white/5 p-6 text-center">
+        <p class="text-red-400 font-semibold">The lesson came back malformed: ${escapeHtml(v.error)}. Try generating again.</p></div>`;
+      return;
+    }
+    LT.startLesson(v.lesson);
+  }
+
+  async function buildFirstLessonPrompt() {
+    const system =
+      "You are a master teacher designing the FIRST lesson in a course built from the learner's provided documents. " +
+      "This is an overview/introduction lesson \u2014 give the learner a broad understanding of what's in their documents " +
+      "and the key concepts they'll master. Do NOT try to cover everything; this is lesson 1 of a sequence.\n\n" +
+      "Return ONLY a JSON object with this exact shape:\n" +
+      "{\n" +
+      '  "id": "kebab-case-id", "title": "...", "subtitle": "one short line",\n' +
+      '  "steps": [\n' +
+      '    { "type": "teach", "title": "...", "body": "1-3 sentences; may use <strong>/<em>" },\n' +
+      '    { "type": "check", "concept": "kebab", "question": "...",\n' +
+      '      "options": [ {"text":"...","correct":true,"insight":"..."},\n' +
+      '                   {"text":"...","correct":false,"miss":"kebab","insight":"..."} ] }\n' +
+      "  ]\n" +
+      "}\n\n" +
+      "RULES:\n" +
+      "- 7-9 steps; open with a motivating 'teach', include 3-4 'check' steps, end with a summarizing 'teach'.\n" +
+      "- Every 'check' tests understanding/application (never recall), has exactly one correct option.\n" +
+      "- Wrong options map to specific sections of the source so the learner knows where to restudy.\n" +
+      "- No markdown, no code fences, JSON only.\n\n" +
+      GROUNDING_RULES;
+    const source = await sourceBlockAsync();
+    const user =
+      source +
+      "This is the FIRST lesson. Give an overview of the documents \u2014 what topics they cover, " +
+      "the main ideas, and what the learner will understand by the end. " +
+      "Write the lesson now as a single JSON object, grounded entirely in the source material above.";
+    return [{ role: "system", content: system }, { role: "user", content: user }];
+  }
+
   function buildNextLessonPrompt() {
     const seed = S.nextSeed || null;
     const prevTitle = (seed && seed.title) || (S.activeLesson && S.activeLesson.title) || "the previous topic";
@@ -338,5 +430,5 @@
   }
 
   // Public surface other modules call.
-  LT.Authoring = { generateLesson, generateNextLesson, validateLesson };
+  LT.Authoring = { generateLesson, generateFirstLesson, generateNextLesson, validateLesson };
 })(window.LT);

@@ -20,77 +20,53 @@
   const { escapeHtml } = LT;
 
   // ================= Course flow =================
-  // The course is the four PRE-GENERATED lessons in course-lessons.js (built by
-  // gen-course.js, grounded in source-material.js). We play them in order, then
-  // fall back to LIVE generation for lesson five onward. If the pre-generated
-  // file isn't present yet, we degrade gracefully to the old behavior.
-  const COURSE = Array.isArray(window.COURSE_LESSONS) ? window.COURSE_LESSONS : [];
+  // Courses are generated LIVE from uploaded source material via authoring.js.
+  // The pre-generated COURSE_LESSONS array is no longer used; every lesson is
+  // authored on-demand from the user's documents.
 
-  // Which course lessons has the learner already completed? Tracked by lessonId
+  // Which lessons has the learner already completed? Tracked by lessonId
   // from the persistent log, so it survives reloads.
-  function completedCourseIds() {
-    const done = new Set(LearnerStore.history().map((e) => e.lessonId));
-    return COURSE.filter((l) => done.has(l.id)).map((l) => l.id);
+  function completedLessonIds() {
+    return new Set(LearnerStore.history().map((e) => e.lessonId));
   }
 
-  // Index of the next course lesson the learner hasn't finished, or -1 if they've
-  // cleared all four (time to generate fresh ones).
-  function nextCourseIndex() {
-    const done = new Set(completedCourseIds());
-    return COURSE.findIndex((l) => !done.has(l.id));
-  }
-
-  // The single home CTA: play the next unfinished course lesson; once the course
-  // is exhausted, generate the next lesson live from the most recent completion.
+  // The single home CTA: generate the first (or next) lesson from uploaded docs.
   function startCourse() {
-    if (COURSE.length) {
-      const idx = nextCourseIndex();
-      if (idx >= 0) return startLesson(COURSE[idx]);
-    }
-    // Course finished (or never pre-generated) -> live generation, reseeded from
-    // the last saved run so it advances even after a reload.
     const history = LearnerStore.history();
-    if (!history.length && !COURSE.length) return startLesson(LONDON_LESSON);
+    if (!history.length) {
+      // First run — generate a lesson covering the source material overview
+      return LT.Authoring.generateFirstLesson();
+    }
+    // Continuing — generate next lesson based on what they've studied
     const last = history[0] || {};
     LT.Authoring.generateNextLesson({
-      title: last.title || (COURSE.length ? COURSE[COURSE.length - 1].title : "the London System"),
+      title: last.title || "your documents",
       focus: (last.misconceptions || []).join("; "),
       missed: (last.misconceptions || []).join(", "),
     });
   }
 
-  // Keep the home button honest about where the learner is in the course.
+  // Keep the home button honest about where the learner is.
   function updateHeroCta() {
     if (!els.start) return;
-    const total = COURSE.length;
-    const doneInCourse = total ? completedCourseIds().length : LearnerStore.stats().lessons;
-    const idx = total ? nextCourseIndex() : -1;
-
-    let label;
-    if (total) {
-      if (doneInCourse === 0) label = "Start lesson 1";
-      else if (idx >= 0) label = `Continue \u2014 lesson ${idx + 1}`;
-      else label = "Generate the next lesson"; // course cleared
-    } else {
-      label = doneInCourse ? `Continue \u2014 lesson ${doneInCourse + 1}` : "Start lesson 1";
-    }
+    const done = LearnerStore.stats().lessons;
+    const label = done ? `Continue \u2014 lesson ${done + 1}` : "Generate my course";
     els.start.innerHTML = `${label} <span aria-hidden="true">&rarr;</span>`;
-    if (els.heroEyebrow) els.heroEyebrow.textContent = doneInCourse ? "Welcome back" : "Your course";
-
-    // The "Previous lessons" button only makes sense once lessons exist to revisit.
-    if (els.libraryBtn) els.libraryBtn.hidden = !total;
+    if (els.heroEyebrow) els.heroEyebrow.textContent = done ? "Welcome back" : "AI-Powered Learning";
+    if (els.libraryBtn) els.libraryBtn.hidden = !done;
   }
 
   // ================= Lesson library (revisit any made lesson) =================
-  // Lists the pre-generated course lessons (with completion status) plus the
-  // hand-authored interactive lesson, so the learner can replay any of them.
+  // Lists completed lessons from the learner's progress log.
   function libraryList() {
-    const list = COURSE.map((l, i) => ({ lesson: l, num: i + 1, tag: "Course" }));
-    // Offer the hand-authored interactive (play-the-moves) lesson as a bonus.
-    if (typeof LONDON_LESSON !== "undefined") {
-      list.push({ lesson: LONDON_LESSON, num: null, tag: "Interactive board" });
-    }
-    return list;
+    const history = LearnerStore.history();
+    if (!Array.isArray(history)) return [];
+    // Reverse so newest first, return lesson summaries for replay
+    return history.map((entry, i) => ({
+      lesson: { id: entry.lessonId, title: entry.title, subtitle: "" },
+      num: history.length - i,
+      tag: "Completed"
+    }));
   }
 
   function openLibrary() {

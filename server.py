@@ -1,43 +1,35 @@
 #!/usr/bin/env python3
 """
-Local dev server + LLM proxy for the London System tutor.
+Hermes Tutor — local dev server + LLM proxy + document upload.
 
-Why a proxy (and not call the model straight from the browser)?
-  1. CORS: browsers block cross-origin calls to the model host. Serving the app
-     and proxying the model from the SAME origin sidesteps that entirely.
-  2. Secrets: the API key (e.g. OpenCode Zen for "big-pickle") stays server-side
-     and is never shipped to the browser.
-  3. Backend-agnostic: the frontend always calls same-origin /api/generate. To
-     switch models we only change this proxy's config (env vars) — one line — so
-     local Ollama today and Big Pickle (OpenCode Zen) later are interchangeable.
+Serves the app, proxies LLM calls to any OpenAI-compatible backend, and
+accepts document uploads (PDF, text, markdown, HTML) that become the
+course's source material — the single source of truth for AI authoring.
 
-Stdlib only — no pip installs, stays a zero-build prototype.
+Stdlib only — zero pip installs, zero-build prototype.
 
 Run:
     python3 server.py                       # defaults to local Ollama
-    # Switch to Big Pickle once you've run `opencode auth login`:
-    LLM_BASE_URL=https://opencode.ai/zen/v1 \
-    LLM_MODEL=big-pickle \
-    LLM_API_KEY=$(your_opencode_zen_key) \
+    # Point at Lenovo over Tailscale:
+    LLM_BASE_URL=http://100.85.15.59:11434/v1 \\
+    LLM_MODEL=qwen3.6:35b-a3b \\
     python3 server.py
 """
 
 import json
 import os
+import re
 import time
 import urllib.request
 import urllib.error
+import cgi
+import io
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 
 def _load_dotenv(path=".env"):
-    """Minimal .env loader (stdlib only — no python-dotenv dependency).
-
-    Why: the API key must stay out of source and out of git. Keeping it in a
-    gitignored .env that we load here means `python3 server.py` "just works"
-    locally, while the secret never ships in the repo. Real env vars still win
-    (we don't overwrite anything already set in the shell).
-    """
+    """Minimal .env loader (stdlib only — no python-dotenv dependency)."""
     if not os.path.exists(path):
         return
     with open(path, "r", encoding="utf-8") as fh:
@@ -50,27 +42,79 @@ def _load_dotenv(path=".env"):
             os.environ.setdefault(key, value)
 
 
-# Load .env BEFORE reading config below, so the values are available.
 _load_dotenv()
 
 # --- Backend configuration -------------------------------------------------
-# Everything the model call needs lives here. Defaults point at local Ollama's
-# OpenAI-compatible endpoint (the same one OpenCode itself uses). Override with
-# env vars to target Big Pickle / OpenCode Zen without touching any other code.
 BACKEND = {
     "base_url": os.environ.get("LLM_BASE_URL", "http://127.0.0.1:11434/v1"),
-    "model": os.environ.get("LLM_MODEL", "gemma4-31b-mlx-48k:latest"),
+    "model": os.environ.get("LLM_MODEL", "qwen3.6:35b-a3b"),
     "api_key": os.environ.get("LLM_API_KEY", ""),
 }
 
 PORT = int(os.environ.get("PORT", "8753"))
-# Generous because authoring a full lesson can be a large generation, and the
-# review call may run on a big local model that is slow on first (cold) load.
-LLM_TIMEOUT_S = int(os.environ.get("LLM_TIMEOUT_S", "300"))
+LLM_TIMEOUT_S = int(os.environ.get("LLM_TIMEOUT_S", "600"))
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", ".uploads"))
+MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "50"))
+
+
+def extract_text_from_pdf(data: bytes) -> str:
+    """Crude PDF text extraction — pulls readable strings from raw bytes.
+    For production, use pymupdf or pdfplumber. This works for most text-based PDFs."""
+    text = data.decode("latin-1", errors="replace")
+    # Try to find text between stream/endstream or BT/ET blocks
+    chunks = []
+    # Simple approach: extract anything that looks like readable text
+    # Strip binary garbage, keep printable ASCII + common unicode
+    cleaned = []
+    for ch in text:
+        if ch.isprintable() or ch in '\n\r\t':
+            cleaned.append(ch)
+        else:
+            cleaned.append(' ')
+    text = ''.join(cleaned)
+    # Collapse whitespace
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    text = re.sub(r'[ \t]{3,}', '  ', text)
+    # Remove very short lines (likely noise)
+    lines = [l.strip() for l in text.split('\n') if len(l.strip()) > 3]
+    return '\n'.join(lines)
+
+
+def extract_text_from_html(data: bytes) -> str:
+    """Strip HTML tags, return plain text."""
+    text = data.decode("utf-8", errors="replace")
+    # Remove scripts and styles
+    text = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    # Remove tags
+    text = re.sub(r'<[^>]+>', ' ', text)
+    # Decode entities
+    text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+    text = text.replace('&quot;', '"').replace('&#39;', "'").replace('&nbsp;', ' ')
+    # Collapse whitespace
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    return '\n'.join(lines)
+
+
+def extract_text(path: str, data: bytes) -> str:
+    """Extract text from a document based on its extension."""
+    ext = Path(path).suffix.lower()
+    if ext == '.pdf':
+        return extract_text_from_pdf(data)
+    elif ext in ('.html', '.htm'):
+        return extract_text_from_html(data)
+    elif ext in ('.md', '.txt', '.text'):
+        return data.decode("utf-8", errors="replace")
+    else:
+        return data.decode("utf-8", errors="replace")
+
+
+# --- In-memory store for uploaded documents (reset on server restart) ---
+_uploaded_docs = []
 
 
 class Handler(SimpleHTTPRequestHandler):
-    """Serves static files normally, but intercepts the /api/* routes."""
+    """Serves static files, proxies LLM calls, and accepts document uploads."""
 
     def _send_json(self, status, payload):
         body = json.dumps(payload).encode("utf-8")
@@ -81,33 +125,47 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        # Lightweight health/config probe so the UI can show which model is live.
         if self.path == "/api/health":
             self._send_json(200, {
                 "ok": True,
                 "model": BACKEND["model"],
                 "base_url": BACKEND["base_url"],
-                # Never leak the key itself — only whether one is configured.
                 "api_key_set": bool(BACKEND["api_key"]),
+                "docs_loaded": len(_uploaded_docs),
+                "doc_names": [d["name"] for d in _uploaded_docs],
             })
             return
-        # Everything else is a static file (index.html, app.js, css, ...).
+        if self.path == "/api/source-material":
+            # Return the current source material built from uploaded docs
+            sections = []
+            for doc in _uploaded_docs:
+                # Truncate each doc to ~8000 chars for the source material
+                text = doc["text"]
+                if len(text) > 8000:
+                    text = text[:8000] + "\n\n[... content truncated for length ...]"
+                sections.append({
+                    "heading": doc["name"],
+                    "body": text,
+                })
+            self._send_json(200, {
+                "ok": True,
+                "title": "Uploaded Documents",
+                "sections": sections,
+            })
+            return
         return super().do_GET()
 
     def do_POST(self):
         if self.path == "/api/generate":
             self._handle_generate()
             return
+        if self.path == "/api/upload":
+            self._handle_upload()
+            return
         self._send_json(404, {"ok": False, "error": "Unknown endpoint"})
 
     def _handle_generate(self):
-        """Forward a chat request to the configured OpenAI-compatible backend.
-
-        Request body (from the browser):
-            { "messages": [...], "temperature"?, "json"?: bool, "max_tokens"? }
-        Response:
-            { "ok": true, "content": "<model text>", "model": ..., "ms": <int> }
-        """
+        """Forward a chat request to the configured OpenAI-compatible backend."""
         try:
             length = int(self.headers.get("Content-Length", "0"))
             req = json.loads(self.rfile.read(length) or b"{}")
@@ -126,7 +184,6 @@ class Handler(SimpleHTTPRequestHandler):
             "temperature": req.get("temperature", 0.4),
             "stream": False,
         }
-        # Ask for strict JSON when the caller needs a parseable object back.
         if req.get("json"):
             payload["response_format"] = {"type": "json_object"}
         if req.get("max_tokens"):
@@ -152,14 +209,12 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": f"Backend {e.code}", "detail": detail})
             return
         except urllib.error.URLError as e:
-            # Most common cause: the model host isn't running / wrong base_url.
             self._send_json(502, {"ok": False, "error": f"Cannot reach model backend: {e.reason}"})
             return
-        except Exception as e:  # noqa: BLE001 - surface anything else cleanly to the UI
+        except Exception as e:
             self._send_json(500, {"ok": False, "error": str(e)})
             return
 
-        # Pull the assistant text out of the OpenAI-compatible response shape.
         try:
             content = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
@@ -173,17 +228,74 @@ class Handler(SimpleHTTPRequestHandler):
             "ms": int((time.time() - started) * 1000),
         })
 
+    def _handle_upload(self):
+        """Accept uploaded documents, extract text, store as source material."""
+        global _uploaded_docs
+
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            self._send_json(400, {"ok": False, "error": "Expected multipart/form-data"})
+            return
+
+        # Parse multipart form data
+        boundary = content_type.split("boundary=")[1].strip()
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+
+        # Simple multipart parser
+        files = []
+        boundary_bytes = boundary.encode()
+        parts = body.split(b"--" + boundary_bytes)
+        for part in parts:
+            if b"Content-Disposition" not in part:
+                continue
+            headers_end = part.find(b"\r\n\r\n")
+            if headers_end == -1:
+                continue
+            headers_raw = part[:headers_end].decode("utf-8", errors="replace")
+            file_data = part[headers_end + 4:]
+            # Remove trailing \r\n-- if present
+            if file_data.endswith(b"\r\n"):
+                file_data = file_data[:-2]
+
+            # Extract filename
+            match = re.search(r'filename="([^"]*)"', headers_raw)
+            if not match:
+                continue
+            filename = match.group(1)
+            if not filename:
+                continue
+
+            # Check size
+            if len(file_data) > MAX_UPLOAD_MB * 1024 * 1024:
+                self._send_json(413, {"ok": False, "error": f"{filename} exceeds {MAX_UPLOAD_MB}MB limit"})
+                return
+
+            text = extract_text(filename, file_data)
+            files.append({"name": filename, "text": text, "size": len(file_data)})
+
+        if not files:
+            self._send_json(400, {"ok": False, "error": "No valid files found in upload"})
+            return
+
+        _uploaded_docs = files
+        self._send_json(200, {
+            "ok": True,
+            "files": [{"name": f["name"], "size": f["size"], "chars": len(f["text"])} for f in files],
+            "total_chars": sum(len(f["text"]) for f in files),
+        })
+
     def log_message(self, fmt, *args):
-        # Quieter logs: skip the noisy static-asset lines, keep API + errors.
         if "/api/" in (self.path or "") or (args and str(args[1]).startswith(("4", "5"))):
             super().log_message(fmt, *args)
 
 
 def main():
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    print(f"London System tutor on http://localhost:{PORT}")
+    UPLOAD_DIR.mkdir(exist_ok=True)
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"Hermes Tutor on http://localhost:{PORT}")
     print(f"  model backend : {BACKEND['model']}  @ {BACKEND['base_url']}")
     print(f"  api key set   : {bool(BACKEND['api_key'])}")
+    print(f"  upload dir    : {UPLOAD_DIR}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
