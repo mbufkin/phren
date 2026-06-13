@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes Tutor — local dev server + LLM proxy + document upload.
+Socrates — local dev server + LLM proxy + document upload.
 
 Serves the app, proxies LLM calls to any OpenAI-compatible backend, and
 accepts document uploads (PDF, text, markdown, HTML) that become the
@@ -290,7 +290,7 @@ class Handler(SimpleHTTPRequestHandler):
 def main():
     UPLOAD_DIR.mkdir(exist_ok=True)
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"Hermes Tutor on http://localhost:{PORT}")
+    print(f"Socrates on http://localhost:{PORT}")
     print(f"  model backend : {BACKEND['model']}  @ {BACKEND['base_url']}")
     print(f"  api key set   : {bool(BACKEND['api_key'])}")
     print(f"  upload dir    : {UPLOAD_DIR}")
