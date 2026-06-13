@@ -166,8 +166,8 @@ class Handler(SimpleHTTPRequestHandler):
             for doc in _uploaded_docs:
                 # Truncate each doc to ~8000 chars for the source material
                 text = doc["text"]
-                if len(text) > 8000:
-                    text = text[:8000] + "\n\n[... content truncated for length ...]"
+                if len(text) > 4000:
+                    text = text[:4000] + "\n\n[... truncated for length ...]"
                 sections.append({
                     "heading": doc["name"],
                     "body": text,

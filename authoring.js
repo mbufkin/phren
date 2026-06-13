@@ -52,15 +52,10 @@
 
   // The grounding contract, appended to every authoring system prompt.
   const GROUNDING_RULES =
-    "GROUNDING \u2014 THIS IS THE MOST IMPORTANT RULE:\n" +
-    "- The SOURCE MATERIAL provided in the user message is your SINGLE SOURCE OF TRUTH.\n" +
-    "- Teach ONLY concepts, facts, and ideas that are stated in, or follow directly from, " +
-    "that source. Do NOT add outside knowledge, invent examples, or contradict the source.\n" +
-    "- If the source doesn't cover something, leave it out rather than guessing.\n" +
-    "- Ground every knowledge check in a fact from the source, and base each wrong option on a " +
-    "plausible but incorrect interpretation a learner might make.\n" +
-    "- Every distractor for a knowledge check should map to a specific section of the source " +
-    "so a wrong answer tells the learner exactly where to restudy.";
+    "GROUNDING \u2014 MOST IMPORTANT:\n" +
+    "- Teach ONLY from the SOURCE MATERIAL below. No outside knowledge, no invented examples.\n" +
+    "- Every knowledge check must be answerable from the source. Wrong options = real misconceptions.\n" +
+    "- If the source doesn't cover something, leave it out.";
 
   // Builds the "SOURCE MATERIAL" block placed at the top of the user message.
   function sourceBlock() {
@@ -138,15 +133,11 @@
       "  ]\n" +
       "}\n\n" +
       "RULES:\n" +
-      "- 7 to 9 steps total. Start with a 'teach' that motivates the topic.\n" +
-      "- Step 2 (or 3) MUST be a 'teach' that walks through ONE concrete, illustrative worked example BEFORE any abstract rules \u2014 " +
-      "like a textbook that opens a chapter with a fully worked example or model scenario, narrating it step by step. " +
-      "Only after that example should you generalize into the underlying principles.\n" +
-      "- End with a 'teach' that summarizes what the learner now understands.\n" +
-      "- Include 3 or 4 'check' steps, spread between teaching cards.\n" +
-      "- Each 'check' has 3 or 4 options with EXACTLY ONE correct:true. Every wrong option needs a short 'miss' tag and an 'insight'.\n" +
-      "- 'concept' and 'miss' are short kebab-case tags (e.g. 'confuses-cause-effect').\n" +
-      "- No markdown, no code fences, no commentary \u2014 JSON only. Do NOT include any 'move' steps or 'board' fields.\n\n" +
+      "- 7-9 steps; open with motivation, include 3-4 checks, end with summary.\n" +
+      "- Step 2 or 3 MUST be a concrete worked example BEFORE abstract rules.\n" +
+      "- Checks test understanding/application, never recall. Exactly one correct option per check.\n" +
+      "- Wrong options = kebab miss tag + insight sentence.\n" +
+      "- JSON only, no markdown, no code fences.\n\n" +
       GROUNDING_RULES;
     const source = await sourceBlockAsync();
     const user =
@@ -362,10 +353,10 @@
       "  ]\n" +
       "}\n\n" +
       "RULES:\n" +
-      "- 7-9 steps; open with a motivating 'teach', include 3-4 'check' steps, end with a summarizing 'teach'.\n" +
-      "- Every 'check' tests understanding/application (never recall), has exactly one correct option.\n" +
-      "- Wrong options map to specific sections of the source so the learner knows where to restudy.\n" +
-      "- No markdown, no code fences, JSON only.\n\n" +
+      "- 7-9 steps; open with motivation, include 3-4 checks, end with summary.\n" +
+      "- Checks test understanding/application, never recall. Exactly one correct option.\n" +
+      "- Wrong options map to specific source sections.\n" +
+      "- JSON only, no markdown, no code fences.\n\n" +
       GROUNDING_RULES;
     const source = await sourceBlockAsync();
     const user =
@@ -408,19 +399,12 @@
       '                   {"text":"...","correct":false,"miss":"kebab","insight":"..."} ] }\n' +
       "  ]\n" +
       "}\n\n" +
-      "BOARD RULES (follow EXACTLY or the board renders wrong):\n" +
-      "- startFen is almost always the standard starting position string shown above (begin lines from move 1).\n" +
-      "- Each entry in \"line\" is ONE ply (one side's move), given in legal order from the start position.\n" +
-      "- \"from\"/\"to\" are the actual board squares (a1-h8) of the piece that moves, e.g. the knight g1->f3.\n" +
-      "- For castling, move ONLY the king: white e1->g1 (O-O) or e1->c1 (O-O-O); black e8->g8 or e8->c8.\n" +
-      "- Use 8-16 plies per line. \"san\" is the move label (e.g. \"3. e3\"); \"note\" is one short idea.\n" +
-      "- Use only real, legal London System moves in a sensible order — never invent illegal moves.\n\n" +
+      "BOARD RULES: startFen = standard start; one ply per entry; from/to = real squares a1-h8; " +
+      "castling: king e1→g1 or e1→c1; use 8-16 plies; no illegal moves.\n\n" +
       "LESSON RULES:\n" +
-      "- 7-9 steps; open with a motivating 'teach', put a board walkthrough EARLY (a model line before abstract rules), " +
-      "include a second board later, and end with a summarizing 'teach'.\n" +
-      "- 3-4 'check' steps spread between teaching; each tests understanding/application (never recall), has exactly one " +
-      "correct option, and every wrong option has a short kebab 'miss' tag + an 'insight'.\n" +
-      "- No markdown, no code fences, JSON only. Do NOT use any 'move' steps — use 'board' walkthroughs instead.\n\n" +
+      "- 7-9 steps; open with motivation, board walkthrough early, second board later, end with summary.\n" +
+      "- 3-4 checks; test understanding, never recall; one correct answer per check; wrong = miss tag + insight.\n" +
+      "- JSON only, no markdown, no code fences.\n\n" +
       GROUNDING_RULES;
     const user =
       sourceBlock() +
