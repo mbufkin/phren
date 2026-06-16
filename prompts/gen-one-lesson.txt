@@ -1,0 +1,126 @@
+You are a lesson generation engine for an algebra classroom. Generate ONE lesson from the provided curriculum map.
+
+## Source Material Rule: Only derive content from the provided documents. Do not invent.
+
+## Output Format
+{
+  "domain": "algebra",
+  "week": 1,
+  "lessons": [
+    {
+      "day": 1,
+      "title": "Solving One-Step Addition and Subtraction Equations",
+      "prerequisites": ["basic arithmetic"],
+      "steps": [
+        {
+          "type": "precheck",
+          "concept": "inverse operations",
+          "questions": [
+            {
+              "id": "pc-01",
+              "text": "What is the inverse operation of addition?",
+              "options": [
+                {"text": "subtraction", "correct": true, "insight": "Correct. Subtraction undoes addition."},
+                {"text": "multiplication", "correct": false, "reason": "inverse-error", "insight": "Multiplication's inverse is division, not addition."},
+                {"text": "division", "correct": false, "reason": "inverse-error", "insight": "Division undoes multiplication."},
+                {"text": "squaring", "correct": false, "reason": "random-guess", "insight": "Squaring is not related to undoing addition."}
+              ]
+            },
+            {
+              "id": "pc-02",
+              "text": "Solve: 15 - 8 = ?",
+              "options": [
+                {"text": "7", "correct": true, "insight": "15 minus 8 equals 7."},
+                {"text": "23", "correct": false, "reason": "added-instead-of-subtracted", "insight": "You added instead of subtracted."},
+                {"text": "6", "correct": false, "reason": "arithmetic-error", "insight": "Off by 1 — check your subtraction."},
+                {"text": "8", "correct": false, "reason": "random-guess", "insight": "That's the number being subtracted, not the result."}
+              ]
+            },
+            {
+              "id": "pc-03",
+              "text": "Solve: -3 + 3 = ?",
+              "options": [
+                {"text": "0", "correct": true, "insight": "Adding opposites gives zero."},
+                {"text": "6", "correct": false, "reason": "sign-error", "insight": "You treated -3 as +3. Opposites cancel to zero."},
+                {"text": "-6", "correct": false, "reason": "sign-error", "insight": "You subtracted instead of adding."},
+                {"text": "3", "correct": false, "reason": "random-guess", "insight": "Zero plus 3? Check the signs."}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "teach",
+          "title": "Solving x + a = b",
+          "body": "To solve an equation like x + 5 = 12, we need to isolate x.\\n\\nThe key idea: whatever you do to one side, you must do to the other.\\n\\nStep 1: Identify the operation on x. Here, 5 is ADDED to x.\\nStep 2: Apply the INVERSE operation to both sides. The inverse of adding 5 is subtracting 5.\\nStep 3: x + 5 - 5 = 12 - 5  →  x = 7\\nStep 4: Check: 7 + 5 = 12 ✓\\n\\n**Common mistake:** Forgetting to subtract from BOTH sides. If you only subtract from the left, the equation is no longer true.\\n\\n**Another example:** x - 3 = 10\\nThe inverse of subtracting 3 is adding 3.\\nx - 3 + 3 = 10 + 3  →  x = 13\\nCheck: 13 - 3 = 10 ✓"
+        },
+        {
+          "type": "practice",
+          "concept": "one-step equations",
+          "questions": [
+            {
+              "id": "q-01",
+              "text": "Solve: x + 9 = 20",
+              "answer": 11,
+              "options": [
+                {"text": "11", "correct": true, "insight": "x = 20 - 9 = 11. Nice work."},
+                {"text": "29", "correct": false, "reason": "added-instead-of-subtracted", "insight": "You added 20 + 9 instead of subtracting 9."},
+                {"text": "12", "correct": false, "reason": "arithmetic-error", "insight": "Close. 20 - 9 = 11, not 12."},
+                {"text": "9", "correct": false, "reason": "random-guess", "insight": "That's the number being added to x, not the solution."}
+              ]
+            },
+            {
+              "id": "q-02",
+              "text": "Solve: x - 7 = 15",
+              "answer": 22,
+              "options": [
+                {"text": "22", "correct": true, "insight": "x = 15 + 7 = 22. You got it."},
+                {"text": "8", "correct": false, "reason": "added-instead-of-subtracted", "insight": "You subtracted 7 from 15. Add 7 to both sides instead."},
+                {"text": "-22", "correct": false, "reason": "sign-error", "insight": "15 + 7 = 22, not -22. Check your signs."},
+                {"text": "15", "correct": false, "reason": "random-guess", "insight": "That's just the right side. You need to isolate x."}
+              ]
+            },
+            {
+              "id": "q-03",
+              "text": "Solve: 8 = x + 3",
+              "answer": 5,
+              "options": [
+                {"text": "5", "correct": true, "insight": "x = 8 - 3 = 5. Works either way."},
+                {"text": "11", "correct": false, "reason": "added-instead-of-subtracted", "insight": "You added 8 + 3. Subtract 3 from both sides."},
+                {"text": "3", "correct": false, "reason": "random-guess", "insight": "That's the number added to x, not the solution."},
+                {"text": "24", "correct": false, "reason": "multiplied-instead-of-divided", "insight": "You multiplied 8 × 3. We're adding, not multiplying."}
+              ]
+            },
+            {
+              "id": "q-04",
+              "text": "Solve: x + 2.5 = 10",
+              "answer": 7.5,
+              "options": [
+                {"text": "7.5", "correct": true, "insight": "x = 10 - 2.5 = 7.5. Fractions and decimals work the same way."},
+                {"text": "12.5", "correct": false, "reason": "added-instead-of-subtracted", "insight": "You added instead of subtracted."},
+                {"text": "8.5", "correct": false, "reason": "arithmetic-error", "insight": "10 - 2.5 = 7.5, not 8.5."},
+                {"text": "25", "correct": false, "reason": "multiplied-instead-of-divided", "insight": "You multiplied. Use subtraction, not multiplication."}
+              ]
+            },
+            {
+              "id": "q-05",
+              "text": "Solve: n - 18 = -5",
+              "answer": 13,
+              "options": [
+                {"text": "13", "correct": true, "insight": "n = -5 + 18 = 13. Adding works with negatives too."},
+                {"text": "-23", "correct": false, "reason": "sign-error", "insight": "Add 18 to both sides: -5 + 18 = 13, not -23."},
+                {"text": "23", "correct": false, "reason": "sign-error", "insight": "Check: -5 + 18 = 13, not -23. Sign matters."},
+                {"text": "-13", "correct": false, "reason": "sign-error", "insight": "Positive 13. -5 + 18 = 13. Double-check your arithmetic."}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+
+## Rules
+- precheck: 3 questions, 4 options each, diagnostic distractor reasons
+- teach: Clear steps with worked examples and common mistake callouts
+- practice: 5-7 questions, 4 options each, every wrong answer has a "reason" tag
+- Keep math concrete — real numbers, no abstract proofs

@@ -139,134 +139,8 @@ def extract_text(path: str, data: bytes) -> str:
 
 
 # --- Stateful Teaching Workspace ---
-# Matt Pocock's Teach methodology: the teacher remembers where you've been,
-# what you've learned, and what comes next. The file system IS the memory.
-
-class Workspace:
-    """Persistent per-student teaching workspace on the file system.
-
-    Structure:
-      .phren-workspace/
-        mission.md          — why the student is learning
-        learning-records/   — JSON records after each lesson
-        glossary.md         — accumulated terminology
-        notes.md            — agent's internal notes (preferences, watch-outs)
-        cheat-sheets/       — generated reference cards
-    """
-
-    def __init__(self, root: Path):
-        self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
-        (self.root / "learning-records").mkdir(exist_ok=True)
-        (self.root / "cheat-sheets").mkdir(exist_ok=True)
-
-    # -- mission --
-
-    @property
-    def mission_path(self): return self.root / "mission.md"
-
-    def get_mission(self) -> str | None:
-        if self.mission_path.exists():
-            return self.mission_path.read_text()
-        return None
-
-    def set_mission(self, text: str) -> None:
-        self.mission_path.write_text(text)
-
-    # -- learning records --
-
-    def record_lesson(self, lesson_id: str, data: dict) -> None:
-        """Save a learning record after completing a lesson."""
-        record = {
-            "lesson_id": lesson_id,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            **data,
-        }
-        record_path = self.root / "learning-records" / f"{lesson_id}.json"
-        record_path.write_text(json.dumps(record, indent=2))
-
-    def get_records(self) -> list[dict]:
-        """Return all learning records, most recent first."""
-        records_dir = self.root / "learning-records"
-        records = []
-        for f in sorted(records_dir.glob("*.json"), reverse=True):
-            try:
-                records.append(json.loads(f.read_text()))
-            except json.JSONDecodeError:
-                pass
-        return records
-
-    def last_record(self) -> dict | None:
-        records = self.get_records()
-        return records[0] if records else None
-
-    # -- glossary --
-
-    @property
-    def glossary_path(self): return self.root / "glossary.md"
-
-    def get_glossary(self) -> str:
-        if self.glossary_path.exists():
-            return self.glossary_path.read_text()
-        return ""
-
-    def add_term(self, term: str, definition: str) -> None:
-        """Add or update a glossary entry."""
-        current = self.get_glossary()
-        entry = f"- **{term}**: {definition}\n"
-        if term in current:
-            # Replace existing entry
-            lines = current.split("\n")
-            new_lines = []
-            for line in lines:
-                if line.startswith(f"- **{term}**:"):
-                    new_lines.append(entry.rstrip())
-                else:
-                    new_lines.append(line)
-            current = "\n".join(new_lines) + "\n"
-        else:
-            current += entry
-        self.glossary_path.write_text(current)
-
-    # -- notes --
-
-    @property
-    def notes_path(self): return self.root / "notes.md"
-
-    def get_notes(self) -> str:
-        if self.notes_path.exists():
-            return self.notes_path.read_text()
-        return ""
-
-    def append_note(self, text: str) -> None:
-        stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime())
-        with open(self.notes_path, "a") as f:
-            f.write(f"\n[{stamp}] {text}\n")
-
-    # -- cheat sheets --
-
-    def save_cheat_sheet(self, name: str, content: str) -> None:
-        safe = re.sub(r"[^\w\-]", "_", name)
-        path = self.root / "cheat-sheets" / f"{safe}.md"
-        path.write_text(content)
-
-    def list_cheat_sheets(self) -> list[str]:
-        return [f.stem for f in (self.root / "cheat-sheets").glob("*.md")]
-
-    # -- summary --
-
-    def summary(self) -> dict:
-        """Full workspace state for the health endpoint."""
-        records = self.get_records()
-        return {
-            "has_mission": self.mission_path.exists(),
-            "lesson_count": len(records),
-            "last_lesson": records[0]["lesson_id"] if records else None,
-            "glossary_terms": self.get_glossary().count("- **"),
-            "cheat_sheets": self.list_cheat_sheets(),
-            "notes_size": self.notes_path.stat().st_size if self.notes_path.exists() else 0,
-        }
-
+# Workspace class is defined in workspace.py (stdlib only, same module).
+from workspace import Workspace
 
 # Global workspace instance — the teacher's memory
 _workspace = Workspace(WORKSPACE_DIR)
@@ -274,6 +148,10 @@ _workspace = Workspace(WORKSPACE_DIR)
 
 # --- In-memory store for uploaded documents (reset on server restart) ---
 _uploaded_docs = []
+
+# --- Teacher workspace for school mode ---
+from workspace import TeacherWorkspace
+_teacher_ws = TeacherWorkspace()
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -331,6 +209,26 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/workspace/notes":
             self._send_json(200, {"ok": True, "notes": _workspace.get_notes()})
             return
+        if self.path == "/teacher":
+            self._serve_teacher()
+            return
+        if self.path == "/api/teacher/buckets":
+            self._send_json(200, {
+                "ok": True,
+                "buckets": {
+                    bucket: _teacher_ws.list_bucket_files(bucket)
+                    for bucket in _teacher_ws.BUCKET_NAMES
+                },
+            })
+            return
+        if self.path == "/api/teacher/report":
+            report = _teacher_ws.get_report()
+            self._send_json(200, {"ok": True, "report": report})
+            return
+        if self.path == "/api/teacher/students":
+            # Placeholder — will be wired in Phase 5
+            self._send_json(200, {"ok": True, "students": []})
+            return
         return super().do_GET()
 
     def do_POST(self):
@@ -354,6 +252,15 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if self.path == "/api/workspace/cheat-sheet":
             self._handle_save_cheat_sheet()
+            return
+        if self.path == "/api/teacher/upload":
+            self._handle_teacher_upload()
+            return
+        if self.path == "/api/teacher/crystallize":
+            self._handle_crystallize()
+            return
+        if self.path == "/api/teacher/generate-lessons":
+            self._handle_generate_lessons()
             return
         self._send_json(404, {"ok": False, "error": "Unknown endpoint"})
 
@@ -476,6 +383,124 @@ class Handler(SimpleHTTPRequestHandler):
             "files": [{"name": f["name"], "size": f["size"], "chars": len(f["text"])} for f in files],
             "total_chars": sum(len(f["text"]) for f in files),
         })
+
+    # -- teacher endpoints (school mode) --
+
+    def _serve_teacher(self):
+        """Serve the teacher dashboard HTML page."""
+        teacher_path = Path("teacher.html")
+        if not teacher_path.exists():
+            self._send_json(404, {"ok": False, "error": "teacher.html not found"})
+            return
+        content = teacher_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _handle_teacher_upload(self):
+        """Upload files into a specific teacher bucket (curriculum/district/teacher)."""
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            self._send_json(400, {"ok": False, "error": "Expected multipart/form-data"})
+            return
+
+        boundary = content_type.split("boundary=")[1].strip()
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+
+        # Extract bucket field and files from multipart
+        boundary_bytes = boundary.encode()
+        parts = body.split(b"--" + boundary_bytes)
+        bucket = None
+        saved = []
+
+        for part in parts:
+            if b"Content-Disposition" not in part:
+                continue
+            headers_end = part.find(b"\r\n\r\n")
+            if headers_end == -1:
+                continue
+            headers_raw = part[:headers_end].decode("utf-8", errors="replace")
+            file_data = part[headers_end + 4:]
+            if file_data.endswith(b"\r\n"):
+                file_data = file_data[:-2]
+
+            # Check if this is the bucket field
+            if 'name="bucket"' in headers_raw:
+                # Extract value from field body
+                bucket = file_data.decode("utf-8", errors="replace").strip()
+                continue
+
+            # Check if this is a file
+            match = re.search(r'filename="([^"]*)"', headers_raw)
+            if not match:
+                continue
+            filename = sanitize_filename(match.group(1))
+            if not filename:
+                continue
+
+            if len(file_data) > MAX_UPLOAD_MB * 1024 * 1024:
+                self._send_json(413, {
+                    "ok": False,
+                    "error": f"{filename} exceeds {MAX_UPLOAD_MB}MB limit",
+                })
+                return
+
+            if bucket is None:
+                self._send_json(400, {
+                    "ok": False,
+                    "error": "Missing 'bucket' field (curriculum, district, or teacher)",
+                })
+                return
+
+            if bucket not in _teacher_ws.BUCKET_NAMES:
+                self._send_json(400, {
+                    "ok": False,
+                    "error": f"Unknown bucket '{bucket}'. Choose: {', '.join(_teacher_ws.BUCKET_NAMES)}",
+                })
+                return
+
+            saved_path = _teacher_ws.store_bucket_file(bucket, filename, file_data)
+            saved.append({"name": filename, "bucket": bucket, "size": len(file_data)})
+
+        if not saved:
+            self._send_json(400, {"ok": False, "error": "No valid files found in upload"})
+            return
+
+        self._send_json(200, {"ok": True, "files": saved})
+
+    def _handle_crystallize(self):
+        """Run the crystallization engine via the standalone crystallize module."""
+        from crystallize import run_crystallization
+
+        result = run_crystallization(workspace=_teacher_ws)
+        if result["ok"]:
+            self._send_json(200, result)
+        else:
+            status = 400 if "No documents" in result.get("error", "") else 502
+            self._send_json(status, result)
+
+    def _handle_generate_lessons(self):
+        """Run the lesson generation engine via the standalone gen_lessons module."""
+        from gen_lessons import run_lesson_generation
+
+        # Read optional week parameter from request body
+        week = 1
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length > 0:
+                body = json.loads(self.rfile.read(length) or b"{}")
+                week = body.get("week", 1)
+        except (ValueError, TypeError, json.JSONDecodeError):
+            pass
+
+        result = run_lesson_generation(workspace=_teacher_ws, week=week)
+        if result["ok"]:
+            self._send_json(200, result)
+        else:
+            status = 400 if "No crystallization" in result.get("error", "") else 502
+            self._send_json(status, result)
 
     # -- workspace mutation handlers --
 

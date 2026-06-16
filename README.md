@@ -1,12 +1,8 @@
 # Phren
 
-Upload any document — PDF, markdown, text, HTML — and get an AI-generated interactive course. Built from the London Tutor architecture but generalized for any content.
+φρήν (*phrēn*) — Ancient Greek for the seat of thoughtful reflection. Not intellect alone (*nous*), but the process of careful, embodied reasoning. The tool doesn't tell you what to think. It helps you think through.
 
-**Powered by the Lenovo ThinkStation** — all AI runs on a local model (qwen3-coder-next:q4_K_M) over Tailscale. No API keys, no cloud, no data leaving your network.
-
-## The Name
-
-φρήν (*phrēn*) — Ancient Greek for the seat of thoughtful reflection. Not intellect alone (*nous*), but the process of careful, embodied reasoning. Hippocrates and Aristotle used it to describe the mind at work — the midriff, where Greeks believed deep thought lived. The tool doesn't tell you what to think. It helps you think through.
+Upload any document — PDF, markdown, text, HTML — and get an AI-generated interactive course with deterministic mastery scoring and AI coaching. Built from the London Tutor architecture.
 
 ## What it does
 
@@ -35,6 +31,17 @@ python3 server.py
 ## Architecture
 
 Forked from [London Tutor](https://github.com/mbufkin/london-tutor). Same zero-build architecture (HTML + vanilla JS + Python proxy) with the chess-specific content stripped. The chessboard components are retained (hidden) for future reuse.
+
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| [PRODUCT.md](PRODUCT.md) | Product intent, target users, MVP scope, non-goals |
+| [DESIGN.md](DESIGN.md) | Visual identity, color tokens, interaction model |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System structure, module map, data flow |
+| [AGENTS.md](AGENTS.md) | Operating manual for coding agents (Hermes, Codex, OpenCode) |
+| [DATA.md](DATA.md) | Lesson schema, telemetry contracts, workspace structure, privacy |
+| [ROADMAP.md](ROADMAP.md) | Now / Next / Later / Not Yet |
 
 ## Extension points
 
